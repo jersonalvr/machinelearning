@@ -6,9 +6,9 @@ import pickle
 import plotly.express as px
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier, ExtraTreeRegressor, ExtraTreeClassifier
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 import xgboost as xgb
 from sklearn.utils import resample
@@ -18,7 +18,6 @@ import io
 import google.generativeai as genai
 from time import sleep
 from sklearn.svm import SVC, SVR
-from sklearn.preprocessing import LabelEncoder
 import shap
 from streamlit_shap import st_shap
 
@@ -141,7 +140,7 @@ def show_model_results(model_name, problem_type, y_test, col):
                         elif 'XGBoost' in model_name:
                             explainer = shap.TreeExplainer(actual_model)
                             shap_values = explainer(X_transformed[:100])
-                        elif any(name in model_name for name in ['Random Forest', 'Árbol de Decisión']):
+                        elif any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Árbol de Decisión']):
                             explainer = shap.TreeExplainer(actual_model)
                             shap_values = explainer(X_transformed[:100])
                         else:
@@ -239,7 +238,7 @@ def show_model_results(model_name, problem_type, y_test, col):
                                 st.warning(f"No se pudo generar el force plot: {str(e)}")
 
                             # Decision plot para modelos de árbol
-                            if any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'XGBoost']):
+                            if any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Árbol de Decisión', 'XGBoost']):
                                 st.write("#### Gráfico de Decisión")
                                 try:
                                     st_shap(shap.plots.decision(
@@ -317,13 +316,13 @@ def show_model_results(model_name, problem_type, y_test, col):
                         params_text = "\n".join([f"- {k}: {v}" for k, v in results['best_params'].items()])
                         prompt = f"""Explica de manera clara y concisa los siguientes parámetros del modelo {model_name} y sus valores seleccionados:
 
-                        {params_text}
+{params_text}
 
-                        La explicación debe ser técnicamente precisa pero comprensible para alguien con conocimientos básicos de machine learning.
-                        Incluye:
-                        1. Qué hace cada parámetro
-                        2. Por qué el valor seleccionado podría ser beneficioso
-                        3. Posibles trade-offs de estos valores"""
+La explicación debe ser técnicamente precisa pero comprensible para alguien con conocimientos básicos de machine learning.
+Incluye:
+1. Qué hace cada parámetro
+2. Por qué el valor seleccionado podría ser beneficioso
+3. Posibles trade-offs de estos valores"""
                         
                         # Generate explanation
                         response = model.generate_content(prompt)
@@ -515,6 +514,17 @@ def show_train():
                         'max_features': ['sqrt', 'log2', None]
                     }
                 },
+                'Extra Árbol de Decisión': {
+                    'model': lambda rs: ExtraTreeRegressor(random_state=rs),
+                    'params': {
+                        'max_depth': [3, 5, 7, 10, 15, None],
+                        'min_samples_split': [2, 5, 10, 20],
+                        'min_samples_leaf': [1, 2, 4, 8],
+                        'criterion': ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
+                        'splitter': ['best', 'random'],
+                        'max_features': ['sqrt', 'log2', None]
+                    }
+                },
                 'Random Forest': {
                     'model': lambda rs: RandomForestRegressor(random_state=rs),
                     'params': {
@@ -572,6 +582,19 @@ def show_train():
                 },
                 'Árbol de Decisión': {
                     'model': lambda rs: DecisionTreeClassifier(random_state=rs),
+                    'params': {
+                        'max_depth': [3, 5, 7, 10, 15, None],
+                        'min_samples_split': [2, 5, 10, 20],
+                        'min_samples_leaf': [1, 2, 4, 8],
+                        'criterion': ['gini', 'entropy', 'log_loss'],
+                        'splitter': ['best', 'random'],
+                        'max_features': ['sqrt', 'log2', None],
+                        'class_weight': [None, 'balanced'],
+                        'ccp_alpha': [0.0, 0.1, 0.2]
+                    }
+                },
+                'Extra Árbol de Decisión': {
+                    'model': lambda rs: ExtraTreeClassifier(random_state=rs),
                     'params': {
                         'max_depth': [3, 5, 7, 10, 15, None],
                         'min_samples_split': [2, 5, 10, 20],
