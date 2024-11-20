@@ -8,7 +8,7 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier, ExtraTreeRegressor, ExtraTreeClassifier
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import xgboost as xgb
 from sklearn.utils import resample
@@ -18,6 +18,7 @@ import io
 import google.generativeai as genai
 from time import sleep
 from sklearn.svm import SVC, SVR
+from sklearn.preprocessing import LabelEncoder
 import shap
 from streamlit_shap import st_shap
 
@@ -94,10 +95,10 @@ def show_model_results(model_name, problem_type, y_test, col):
                 st.write("R² Score:", r2_score(y_test, results['y_pred']))
                 st.write("MSE:", mean_squared_error(y_test, results['y_pred']))
 
-            # Add SHAP Analysis section
+            # SHAP Analysis section
             st.write("---")
             st.write("### Análisis SHAP")
-            
+
             if st.button("Mostrar Análisis SHAP", key=f"shap_button_{model_name}"):
                 try:
                     with st.spinner("Calculando valores SHAP..."):
@@ -126,34 +127,61 @@ def show_model_results(model_name, problem_type, y_test, col):
                             X_transformed = X
                             actual_model = model
                         
-                        # Configurar el explainer según el tipo de modelo
+                        def flatten_shap_values(shap_values):
+                            """Flatten multidimensional SHAP values to 2D."""
+                            if isinstance(shap_values, list):
+                                # For multi-class, take absolute values of the first class
+                                shap_values = np.abs(shap_values[0])
+                            
+                            # Handle 3D arrays (samples, features, classes)
+                            if len(shap_values.shape) > 2:
+                                # Take mean across samples or classes
+                                if shap_values.shape[1] > shap_values.shape[2]:
+                                    shap_values = np.abs(shap_values).mean(axis=0)
+                                else:
+                                    shap_values = np.abs(shap_values).mean(axis=2)
+                            
+                            # Ensure 2D
+                            if len(shap_values.shape) > 2:
+                                shap_values = shap_values.reshape(-1, shap_values.shape[-1])
+                            
+                            return shap_values
+
+                        # SHAP Explainer logic
                         if isinstance(actual_model, (LinearRegression, LogisticRegression)):
-                            # Para modelos lineales, usamos un enfoque específico
-                            if isinstance(actual_model, LinearRegression):
-                                # Para regresión lineal, usamos LinearExplainer
-                                explainer = shap.LinearExplainer(actual_model, X_transformed)
-                                shap_values = explainer(X_transformed)
+                            # Para modelos lineales
+                            explainer = shap.LinearExplainer(actual_model, X_transformed)
+                            shap_values = explainer(X_transformed)
+                        elif 'XGBoost' in model_name or any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Trees']):
+                            explainer = shap.TreeExplainer(actual_model)
+                            
+                            # Manejar problemas de clasificación
+                            if problem_type == 'classification':
+                                shap_values = explainer.shap_values(X_transformed)
                             else:
-                                # Para regresión logística
-                                explainer = shap.LinearExplainer(actual_model, X_transformed)
                                 shap_values = explainer(X_transformed)
-                        elif 'XGBoost' in model_name:
-                            explainer = shap.TreeExplainer(actual_model)
-                            shap_values = explainer(X_transformed[:100])
-                        elif any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Árbol de Decisión']):
-                            explainer = shap.TreeExplainer(actual_model)
-                            shap_values = explainer(X_transformed[:100])
-                        else:
-                            # Para modelos SVM y otros
+                        elif isinstance(actual_model, (SVC, SVR)):
+                            # Para SVM
                             background = shap.sample(X_transformed, 100, random_state=42)
                             explainer = shap.KernelExplainer(
                                 actual_model.predict, 
                                 background,
                                 feature_names=X_transformed.columns.tolist()
                             )
-                            shap_values = explainer.shap_values(X_transformed[:100])
-                            if isinstance(shap_values, list):
-                                shap_values = shap_values[0]
+                            
+                            # Para clasificación
+                            if problem_type == 'classification':
+                                shap_values = explainer.shap_values(X_transformed[:100])
+                            else:
+                                shap_values = explainer.shap_values(X_transformed[:100])
+
+                        # Flatten SHAP values (NEW: handle Explanation objects)
+                        if hasattr(shap_values, 'values'):
+                            # If it's an Explanation object, extract numeric values
+                            shap_values_flat = np.abs(shap_values.values).mean(axis=0)
+                        else:
+                            # Existing flattening logic
+                            shap_values_flat = flatten_shap_values(shap_values)
 
                         # Contenedor para controles interactivos
                         control_col1, control_col2 = st.columns(2)
@@ -185,38 +213,49 @@ def show_model_results(model_name, problem_type, y_test, col):
                         plot_container = st.container()
                         with plot_container:
                             plot_width = 380
+                            
                             # Resumen de Impacto de Variables (Beeswarm plot)
                             st.write("#### Resumen de Impacto de Variables")
-                            if isinstance(shap_values, np.ndarray):
-                                # For regular shap values array
-                                st_shap(shap.plots.beeswarm(shap_values))
-                            else:
-                                # For Shap objects (like from TreeExplainer)
-                                st_shap(shap.plots.beeswarm(shap_values))
+                            try:
+                                # Verificar el tipo de shap_values y renderizar apropiadamente
+                                if isinstance(shap_values, shap.Explanation):
+                                    st_shap(shap.plots.beeswarm(shap_values))
+                                else:
+                                    st_shap(shap.plots.beeswarm(shap_values_flat))
+                            except Exception as e:
+                                st.warning(f"No se pudo generar el beeswarm plot: {str(e)}")
 
                             # Waterfall plot para muestra específica
                             st.write(f"#### Análisis Detallado de Muestra {sample_index + 1}")
-                            if isinstance(shap_values, np.ndarray):
-                                explanation = shap.Explanation(
-                                    values=shap_values[sample_index],
-                                    base_values=explainer.expected_value if hasattr(explainer, 'expected_value') else 0,
-                                    data=X_transformed.iloc[sample_index].values,
-                                    feature_names=X_transformed.columns.tolist()
-                                )
-                                st_shap(shap.plots.waterfall(explanation))
-                            else:
-                                st_shap(shap.plots.waterfall(shap_values[sample_index]))
-
+                            try:
+                                # Prepare single sample SHAP values
+                                if isinstance(shap_values, shap.Explanation):
+                                    st_shap(shap.plots.waterfall(shap_values[sample_index]))
+                                else:
+                                    sample_shap_values = shap_values_flat[sample_index]
+                                    
+                                    # Create explanation
+                                    explanation = shap.Explanation(
+                                        values=sample_shap_values,
+                                        base_values=explainer.expected_value if hasattr(explainer, 'expected_value') else 0,
+                                        data=X_transformed.iloc[sample_index].values,
+                                        feature_names=X_transformed.columns.tolist()
+                                    )
+                                    st_shap(shap.plots.waterfall(explanation))
+                            except Exception as e:
+                                st.warning(f"No se pudo generar el waterfall plot: {str(e)}")
                             # Dependence plot para la variable más importante
                             st.write("#### Gráfico de Dependencia")
-                            if isinstance(shap_values, np.ndarray):
-                                most_important_feature = X_transformed.columns[np.abs(shap_values).mean(0).argmax()]
-                                st_shap(shap.plots.scatter(shap_values[:, X_transformed.columns.get_loc(most_important_feature)]))
-                            else:
-                                feature_importance = np.abs(shap_values.values if hasattr(shap_values, 'values') else shap_values).mean(0)
-                                most_important_feature = X_transformed.columns[feature_importance.argmax()]
-                                st_shap(shap.plots.scatter(shap_values[:, X_transformed.columns.get_loc(most_important_feature)]))
-
+                            try:
+                                if isinstance(shap_values, np.ndarray):
+                                    most_important_feature = X_transformed.columns[np.abs(shap_values).mean(0).argmax()]
+                                    st_shap(shap.plots.scatter(shap_values[:, X_transformed.columns.get_loc(most_important_feature)]))
+                                else:
+                                    feature_importance = np.abs(shap_values.values if hasattr(shap_values, 'values') else shap_values).mean(0)
+                                    most_important_feature = X_transformed.columns[feature_importance.argmax()]
+                                    st_shap(shap.plots.scatter(shap_values[:, X_transformed.columns.get_loc(most_important_feature)]))
+                            except Exception as e:
+                                st.warning(f"No se pudo generar el dependence plot: {str(e)}")
                             # Force plot
                             st.write("#### Visualización de Fuerza (Force Plot)")
                             try:
@@ -236,9 +275,8 @@ def show_model_results(model_name, problem_type, y_test, col):
                                     st_shap(shap.plots.force(shap_values[sample_index]))
                             except Exception as e:
                                 st.warning(f"No se pudo generar el force plot: {str(e)}")
-
                             # Decision plot para modelos de árbol
-                            if any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Árbol de Decisión', 'XGBoost']):
+                            if any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'XGBoost']):
                                 st.write("#### Gráfico de Decisión")
                                 try:
                                     st_shap(shap.plots.decision(
@@ -248,34 +286,36 @@ def show_model_results(model_name, problem_type, y_test, col):
                                     ))
                                 except Exception as e:
                                     st.warning(f"No se pudo generar el decision plot: {str(e)}")
-
                             # Feature importance plot
                             st.write("#### Importancia de Variables")
-                            if hasattr(shap_values, 'values'):
-                                feature_importance = np.abs(shap_values.values).mean(0)
-                            else:
-                                feature_importance = np.abs(shap_values).mean(0)
-                            
-                            importance_df = pd.DataFrame({
-                                'feature': X_transformed.columns,
-                                'importance': feature_importance
-                            }).sort_values('importance', ascending=False)
-                            
-                            fig = px.bar(
-                                importance_df.head(max_display),
-                                x='importance',
-                                y='feature',
-                                orientation='h',
-                                title='SHAP Feature Importance'
-                            )
-                            
-                            fig.update_layout(
-                                width=plot_width,
-                                height=400,
-                                margin=dict(l=20, r=20, t=40, b=20)
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-
+                            try:
+                                # Ajustar cálculo de importancia para diferentes tipos de SHAP values
+                                if isinstance(shap_values, shap.Explanation):
+                                    feature_importance = np.abs(shap_values.values).mean(axis=0)
+                                else:
+                                    feature_importance = np.abs(shap_values_flat).mean(axis=0)
+                                
+                                importance_df = pd.DataFrame({
+                                    'feature': X_transformed.columns.tolist(),
+                                    'importance': feature_importance
+                                }).sort_values('importance', ascending=False)
+                                
+                                fig = px.bar(
+                                    importance_df.head(max_display),
+                                    x='importance',
+                                    y='feature',
+                                    orientation='h',
+                                    title='SHAP Feature Importance'
+                                )
+                                
+                                fig.update_layout(
+                                    width=plot_width,
+                                    height=400,
+                                    margin=dict(l=20, r=20, t=40, b=20)
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                            except Exception as e:
+                                    st.warning(f"No se pudo calcular la importancia para diferentes tipos de SHAP values: {str(e)}")
                 except Exception as e:
                     st.error(f"Error al calcular valores SHAP: {str(e)}")
                     st.exception(e)
@@ -316,13 +356,13 @@ def show_model_results(model_name, problem_type, y_test, col):
                         params_text = "\n".join([f"- {k}: {v}" for k, v in results['best_params'].items()])
                         prompt = f"""Explica de manera clara y concisa los siguientes parámetros del modelo {model_name} y sus valores seleccionados:
 
-{params_text}
+                        {params_text}
 
-La explicación debe ser técnicamente precisa pero comprensible para alguien con conocimientos básicos de machine learning.
-Incluye:
-1. Qué hace cada parámetro
-2. Por qué el valor seleccionado podría ser beneficioso
-3. Posibles trade-offs de estos valores"""
+                        La explicación debe ser técnicamente precisa pero comprensible para alguien con conocimientos básicos de machine learning.
+                        Incluye:
+                        1. Qué hace cada parámetro
+                        2. Por qué el valor seleccionado podría ser beneficioso
+                        3. Posibles trade-offs de estos valores"""
                         
                         # Generate explanation
                         response = model.generate_content(prompt)
@@ -514,17 +554,18 @@ def show_train():
                         'max_features': ['sqrt', 'log2', None]
                     }
                 },
-                'Extra Árbol de Decisión': {
+                'Extra Trees': {
                     'model': lambda rs: ExtraTreeRegressor(random_state=rs),
                     'params': {
                         'max_depth': [3, 5, 7, 10, 15, None],
                         'min_samples_split': [2, 5, 10, 20],
                         'min_samples_leaf': [1, 2, 4, 8],
+                        'max_features': ['sqrt', 'log2', None],
+                        'bootstrap': [True, False],
                         'criterion': ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                        'splitter': ['best', 'random'],
-                        'max_features': ['sqrt', 'log2', None]
+                        'splitter': ['random', 'best']
                     }
-                },
+                },                
                 'Random Forest': {
                     'model': lambda rs: RandomForestRegressor(random_state=rs),
                     'params': {
@@ -593,19 +634,20 @@ def show_train():
                         'ccp_alpha': [0.0, 0.1, 0.2]
                     }
                 },
-                'Extra Árbol de Decisión': {
+                'Extra Trees': {
                     'model': lambda rs: ExtraTreeClassifier(random_state=rs),
                     'params': {
                         'max_depth': [3, 5, 7, 10, 15, None],
                         'min_samples_split': [2, 5, 10, 20],
                         'min_samples_leaf': [1, 2, 4, 8],
-                        'criterion': ['gini', 'entropy', 'log_loss'],
-                        'splitter': ['best', 'random'],
                         'max_features': ['sqrt', 'log2', None],
+                        'bootstrap': [True, False],
+                        'criterion': ['gini', 'entropy', 'log_loss'],
+                        'splitter': ['random', 'best'],
                         'class_weight': [None, 'balanced'],
                         'ccp_alpha': [0.0, 0.1, 0.2]
                     }
-                },
+                },                
                 'Random Forest': {
                     'model': lambda rs: RandomForestClassifier(random_state=rs),
                     'params': {
