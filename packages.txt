@@ -1,0 +1,2 @@
+libsnappy-dev
+libgl1
