@@ -93,17 +93,16 @@ def show_upload():
     def load_url_file(url: str) -> Optional[pd.DataFrame]:
         """Carga un archivo desde una URL detectando automáticamente el formato"""
         try:
-            response = requests.get(url)
-            if response.status_code != 200:
-                raise Exception("Error al descargar el archivo")
+            response = requests.get(url, timeout=10, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            response.raise_for_status()  # Raises an HTTPError for bad responses
             
             content = io.BytesIO(response.content)
-            
-            # Detectar formato basado en la extensión de la URL
             extension = url.split('.')[-1].lower()
             return load_file(content, extension)
-        except Exception as e:
-            st.error(f"Error al cargar la URL: {str(e)}")
+        except requests.RequestException as e:
+            st.error(f"Detailed URL loading error: {str(e)}")
             return None
         
     def show_supabase_setup_info():
