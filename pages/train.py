@@ -561,11 +561,10 @@ def show_train():
                         'min_samples_split': [2, 5, 10, 20],
                         'min_samples_leaf': [1, 2, 4, 8],
                         'max_features': ['sqrt', 'log2', None],
-                        'bootstrap': [True, False],
                         'criterion': ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
                         'splitter': ['random', 'best']
                     }
-                },                
+                },
                 'Random Forest': {
                     'model': lambda rs: RandomForestRegressor(random_state=rs),
                     'params': {
@@ -641,13 +640,12 @@ def show_train():
                         'min_samples_split': [2, 5, 10, 20],
                         'min_samples_leaf': [1, 2, 4, 8],
                         'max_features': ['sqrt', 'log2', None],
-                        'bootstrap': [True, False],
                         'criterion': ['gini', 'entropy', 'log_loss'],
                         'splitter': ['random', 'best'],
                         'class_weight': [None, 'balanced'],
                         'ccp_alpha': [0.0, 0.1, 0.2]
                     }
-                },                
+                },           
                 'Random Forest': {
                     'model': lambda rs: RandomForestClassifier(random_state=rs),
                     'params': {
