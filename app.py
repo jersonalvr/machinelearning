@@ -10,6 +10,7 @@ from pages.upload import show_upload
 from pages.prepare import show_prepare
 from pages.train import show_train
 from pages.test import show_test
+from pages.unsupervised import show_unsupervised
 from pages.github import show_github
 
 # Configuración inicial
@@ -90,7 +91,7 @@ with st.sidebar:
     )
 
 # Resto del código de navegación
-pages = ["Upload", "Prepare", "Training", "Test", "Github"]
+pages = ["Upload", "Prepare", "Training", "Test", "Unsupervised", "Github"]
 styles = {
     "nav": {
         "background-color": "rgb(33, 216, 160)",
@@ -129,5 +130,7 @@ elif st.session_state.current_page == "Training":
     show_train()
 elif st.session_state.current_page == "Test":
     show_test()
+elif st.session_state.current_page == "Unsupervised":
+    show_unsupervised()
 elif st.session_state.current_page == "Github":
     show_github()
