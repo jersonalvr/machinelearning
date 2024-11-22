@@ -103,13 +103,29 @@ def evaluate_classification_model(model, X, y):
         X = X_aligned
     
     try:
+        # Check if there's a label encoder in the session state
+        if 'label_encoder' in st.session_state:
+            le = st.session_state.label_encoder
+            # Convertir las etiquetas originales a codificadas
+            y_encoded = le.transform(y)
+        else:
+            # Si no hay label encoder, intentar manejar las etiquetas
+            unique_labels = np.unique(y)
+            if len(unique_labels) == 2:
+                y_encoded = np.where(y == unique_labels[0], 0, 1)
+            else:
+                # Codificación genérica para multiclase
+                from sklearn.preprocessing import LabelEncoder
+                le = LabelEncoder()
+                y_encoded = le.fit_transform(y)
+
         predictions = model.predict(X)
         
         return {
-            'accuracy': accuracy_score(y, predictions),
-            'confusion_matrix': confusion_matrix(y, predictions),
-            'classification_report': classification_report(y, predictions),
-            'predictions': predictions,
+            'accuracy': accuracy_score(y_encoded, predictions),
+            'confusion_matrix': confusion_matrix(y_encoded, predictions),
+            'classification_report': classification_report(y_encoded, predictions),
+            'predictions': le.inverse_transform(predictions) if 'le' in locals() else predictions,
             'true_values': y
         }
     except Exception as e:
