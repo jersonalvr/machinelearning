@@ -5,9 +5,18 @@ import time
 import pickle
 import plotly.express as px
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import (
+    LinearRegression, LogisticRegression, Lasso, Ridge,
+    SGDClassifier, RidgeClassifier, PassiveAggressiveClassifier
+)
 from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier, ExtraTreeRegressor, ExtraTreeClassifier
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import (
+    RandomForestRegressor, RandomForestClassifier,
+    GradientBoostingClassifier, AdaBoostClassifier,
+    BaggingClassifier
+)
+from sklearn.naive_bayes import GaussianNB, MultinomialNB, BernoulliNB
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import xgboost as xgb
@@ -40,10 +49,6 @@ def train_model(X_train, X_test, y_train, y_test, model_info, problem_type, col,
         # Create a copy of model_info with the instantiated model
         model_info_copy = model_info.copy()
         model_info_copy['model'] = model_instance
-
-        # Para modelos XGBoost, asegúrate de que tree_method esté configurado correctamente
-        if 'XGBoost' in model_name:
-            st.info("Usando XGBoost con GPU. Asegúrate de que `tree_method` esté configurado a a 'hist' y `device` a 'cuda:0'.")
 
         grid_search = GridSearchCV(
             model_info_copy['model'],
@@ -154,7 +159,6 @@ def show_model_results(model_name, problem_type, y_test, col):
                             shap_values = explainer(X_transformed)
                         elif 'XGBoost' in model_name or any(name in model_name for name in ['Random Forest', 'Árbol de Decisión', 'Extra Trees']):
                             explainer = shap.TreeExplainer(actual_model)
-                            
                             # Manejar problemas de clasificación
                             if problem_type == 'classification':
                                 shap_values = explainer.shap_values(X_transformed)
@@ -168,7 +172,19 @@ def show_model_results(model_name, problem_type, y_test, col):
                                 background,
                                 feature_names=X_transformed.columns.tolist()
                             )
-                            
+                            # Para clasificación
+                            if problem_type == 'classification':
+                                shap_values = explainer.shap_values(X_transformed[:100])
+                            else:
+                                shap_values = explainer.shap_values(X_transformed[:100])
+                        else:
+                            # Para otros modelos, utilizar KernelExplainer
+                            background = shap.sample(X_transformed, 100, random_state=42)
+                            explainer = shap.KernelExplainer(
+                                actual_model.predict, 
+                                background,
+                                feature_names=X_transformed.columns.tolist()
+                            )
                             # Para clasificación
                             if problem_type == 'classification':
                                 shap_values = explainer.shap_values(X_transformed[:100])
@@ -543,6 +559,35 @@ def show_train():
                         'scaler__with_std': [True, False]
                     }
                 },
+                'Lasso': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('regressor', Lasso(random_state=rs))
+                    ]),
+                    'params': {
+                        'regressor__alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0],
+                        'regressor__fit_intercept': [True, False],
+                        'regressor__max_iter': [1000, 2000, 5000],
+                        'regressor__selection': ['cyclic', 'random'],
+                        'regressor__tol': [1e-4, 1e-3],
+                        'scaler__with_mean': [True, False],
+                        'scaler__with_std': [True, False]
+                    }
+                },
+                'Ridge': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('regressor', Ridge(random_state=rs))
+                    ]),
+                    'params': {
+                        'regressor__alpha': [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0],
+                        'regressor__fit_intercept': [True, False],
+                        'regressor__solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'],
+                        'regressor__tol': [1e-4, 1e-3],
+                        'scaler__with_mean': [True, False],
+                        'scaler__with_std': [True, False]
+                    }
+                },                
                 'Árbol de Decisión': {
                     'model': lambda rs: DecisionTreeRegressor(random_state=rs),
                     'params': {
@@ -590,7 +635,7 @@ def show_train():
                 'XGBoost': {
                     'model': lambda rs: xgb.XGBRegressor(
                         tree_method='hist',
-                        device='cuda:0',
+                        device='cuda',
                         enable_categorical=True,
                         random_state=rs
                     ),
@@ -620,6 +665,110 @@ def show_train():
                         'tol': [1e-4, 1e-3, 1e-2]
                     }
                 },
+                'Ridge Classifier': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', RidgeClassifier(random_state=rs))
+                    ]),
+                    'params': {
+                        'classifier__alpha': [0.1, 1.0, 10.0],
+                        'classifier__fit_intercept': [True, False],
+                        'classifier__solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'],
+                        'classifier__tol': [1e-4, 1e-3],
+                        'classifier__class_weight': [None, 'balanced']
+                    }
+                },
+                'SGD Classifier': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', SGDClassifier(random_state=rs))
+                    ]),
+                    'params': {
+                        'classifier__loss': ['hinge', 'log_loss', 'modified_huber'],
+                        'classifier__penalty': ['l1', 'l2', 'elasticnet'],
+                        'classifier__alpha': [0.0001, 0.001, 0.01],
+                        'classifier__learning_rate': ['optimal', 'constant', 'adaptive'],
+                        'classifier__class_weight': [None, 'balanced'],
+                        'classifier__eta0': [0.01, 0.1, 1.0]
+                    }
+                },
+                'Passive Aggressive': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', PassiveAggressiveClassifier(random_state=rs))
+                    ]),
+                    'params': {
+                        'classifier__C': [0.1, 1.0, 10.0],
+                        'classifier__fit_intercept': [True, False],
+                        'classifier__loss': ['hinge', 'squared_hinge'],
+                        'classifier__class_weight': [None, 'balanced'],
+                        'classifier__warm_start': [True, False],
+                        'classifier__average': [True, False]
+                    }
+                },
+                'K-Nearest Neighbors': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', KNeighborsClassifier())
+                    ]),
+                    'params': {
+                        'classifier__n_neighbors': [3, 5, 7, 9, 11],
+                        'classifier__weights': ['uniform', 'distance'],
+                        'classifier__algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute'],
+                        'classifier__leaf_size': [10, 30, 50],
+                        'classifier__p': [1, 2]  # 1 para distancia Manhattan, 2 para Euclidiana
+                    }
+                },
+                'Naive Bayes Gaussiano': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', GaussianNB())
+                    ]),
+                    'params': {
+                        'classifier__var_smoothing': [1e-11, 1e-10, 1e-9, 1e-8, 1e-7]
+                    }
+                },
+                'Naive Bayes Bernoulli': {
+                    'model': lambda rs: Pipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', BernoulliNB())
+                    ]),
+                    'params': {
+                        'classifier__alpha': [0.1, 0.5, 1.0],
+                        'classifier__binarize': [0.0, 0.5, None],
+                        'classifier__fit_prior': [True, False]
+                    }
+                },
+                'Gradient Boosting': {
+                    'model': lambda rs: GradientBoostingClassifier(random_state=rs),
+                    'params': {
+                        'n_estimators': [100, 200, 300],
+                        'learning_rate': [0.01, 0.05, 0.1],
+                        'max_depth': [3, 5, 7],
+                        'min_samples_split': [2, 5, 10],
+                        'min_samples_leaf': [1, 2, 4],
+                        'subsample': [0.8, 0.9, 1.0],
+                        'max_features': ['sqrt', 'log2']
+                    }
+                },
+                'AdaBoost': {
+                    'model': lambda rs: AdaBoostClassifier(random_state=rs),
+                    'params': {
+                        'n_estimators': [50, 100, 200],
+                        'learning_rate': [0.01, 0.1, 1.0],
+                        'algorithm': ['SAMME', 'SAMME.R']
+                    }
+                },
+                'Bagging': {
+                    'model': lambda rs: BaggingClassifier(random_state=rs),
+                    'params': {
+                        'n_estimators': [10, 20, 30],
+                        'max_samples': [0.5, 0.7, 1.0],
+                        'max_features': [0.5, 0.7, 1.0],
+                        'bootstrap': [True, False],
+                        'bootstrap_features': [True, False]
+                    }
+                },                
                 'Árbol de Decisión': {
                     'model': lambda rs: DecisionTreeClassifier(random_state=rs),
                     'params': {
@@ -673,7 +822,7 @@ def show_train():
                 'XGBoost': {
                     'model': lambda rs: xgb.XGBClassifier(
                         tree_method='hist',
-                        device='cuda:0',
+                        device='cuda',
                         enable_categorical=True,
                         eval_metric='logloss',
                         random_state=rs
